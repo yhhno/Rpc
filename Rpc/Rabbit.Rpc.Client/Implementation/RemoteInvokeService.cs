@@ -1,7 +1,7 @@
 ﻿using Rabbit.Rpc.Client.Address.Resolvers;
 using Rabbit.Rpc.Exceptions;
+using Rabbit.Rpc.Logging;
 using Rabbit.Rpc.Messages;
-using Rabbit.Rpc.Serialization;
 using Rabbit.Rpc.Transport;
 using System;
 using System.Threading;
@@ -13,21 +13,23 @@ namespace Rabbit.Rpc.Client.Implementation
     {
         private readonly IAddressResolver _addressResolver;
         private readonly ITransportClientFactory _transportClientFactory;
+        private readonly ILogger<RemoteInvokeService> _logger;
 
-        public RemoteInvokeService(IAddressResolver addressResolver, ITransportClientFactory transportClientFactory, ISerializer serializer)
+        public RemoteInvokeService(IAddressResolver addressResolver, ITransportClientFactory transportClientFactory, ILogger<RemoteInvokeService> logger)
         {
             _addressResolver = addressResolver;
             _transportClientFactory = transportClientFactory;
+            _logger = logger;
         }
 
         #region Implementation of IRemoteInvokeService
 
-        public Task<TransportMessage> InvokeAsync(RemoteInvokeContext context)
+        public Task<RemoteInvokeResultMessage> InvokeAsync(RemoteInvokeContext context)
         {
             return InvokeAsync(context, Task.Factory.CancellationToken);
         }
 
-        public async Task<TransportMessage> InvokeAsync(RemoteInvokeContext context, CancellationToken cancellationToken)
+        public async Task<RemoteInvokeResultMessage> InvokeAsync(RemoteInvokeContext context, CancellationToken cancellationToken)
         {
             if (context == null)
                 throw new ArgumentNullException(nameof(context));
@@ -44,15 +46,19 @@ namespace Rabbit.Rpc.Client.Implementation
             if (address == null)
                 throw new RpcException($"无法解析服务Id：{invokeMessage.ServiceId}的地址信息。");
 
-            var client = _transportClientFactory.CreateClient(address.CreateEndPoint());
-            var message = new TransportMessage<RemoteInvokeMessage>
+            try
             {
-                Content = context.InvokeMessage,
-                Id = Guid.NewGuid().ToString("N")
-            };
-            await client.SendAsync(TransportMessage.Convert(message));
-            var resultMessage = await client.ReceiveAsync(message.Id);
-            return resultMessage;
+                var client = _transportClientFactory.CreateClient(address.CreateEndPoint());
+                var message = context.InvokeMessage;
+                var resultMessage = client.ReceiveAsync(message.Id);
+                await client.SendAsync(message);
+                return await resultMessage;
+            }
+            catch (Exception exception)
+            {
+                _logger.Fatal($"发起请求中发生了错误，服务Id：{invokeMessage.ServiceId}。", exception);
+                throw;
+            }
         }
 
         #endregion Implementation of IRemoteInvokeService

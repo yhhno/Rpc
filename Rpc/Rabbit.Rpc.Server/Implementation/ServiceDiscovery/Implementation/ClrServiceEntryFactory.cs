@@ -1,3 +1,4 @@
+using Rabbit.Rpc.Convertibles;
 using Rabbit.Rpc.Ids;
 using System;
 using System.Collections.Generic;
@@ -15,15 +16,17 @@ namespace Rabbit.Rpc.Server.Implementation.ServiceDiscovery.Implementation
 
         private readonly IServiceInstanceFactory _serviceFactory;
         private readonly IServiceIdGenerator _serviceIdGenerator;
+        private readonly ITypeConvertibleService _typeConvertibleService;
 
         #endregion Field
 
         #region Constructor
 
-        public ClrServiceEntryFactory(IServiceInstanceFactory serviceFactory, IServiceIdGenerator serviceIdGenerator)
+        public ClrServiceEntryFactory(IServiceInstanceFactory serviceFactory, IServiceIdGenerator serviceIdGenerator, ITypeConvertibleService typeConvertibleService)
         {
             _serviceFactory = serviceFactory;
             _serviceIdGenerator = serviceIdGenerator;
+            _typeConvertibleService = typeConvertibleService;
         }
 
         #endregion Constructor
@@ -40,8 +43,7 @@ namespace Rabbit.Rpc.Server.Implementation.ServiceDiscovery.Implementation
         {
             foreach (var methodInfo in service.GetMethods())
             {
-                var implementationMethodInfo = serviceImplementation.GetMethod(methodInfo.Name,
-                    methodInfo.GetParameters().Select(p => p.ParameterType).ToArray());
+                var implementationMethodInfo = serviceImplementation.GetMethod(methodInfo.Name, methodInfo.GetParameters().Select(p => p.ParameterType).ToArray());
                 yield return Create(_serviceIdGenerator.GenerateServiceId(methodInfo), implementationMethodInfo);
             }
         }
@@ -50,9 +52,9 @@ namespace Rabbit.Rpc.Server.Implementation.ServiceDiscovery.Implementation
 
         #region Private Method
 
-        private ServiceEntry Create(string serviceId, MethodInfo method)
+        private ServiceEntry Create(string serviceId, MethodBase implementationMethod)
         {
-            var type = method.DeclaringType;
+            var type = implementationMethod.DeclaringType;
 
             return new ServiceEntry
             {
@@ -65,13 +67,18 @@ namespace Rabbit.Rpc.Server.Implementation.ServiceDiscovery.Implementation
                     var instance = _serviceFactory.Create(type);
 
                     var list = new List<object>();
-                    foreach (var parameterInfo in method.GetParameters())
+                    foreach (var parameterInfo in implementationMethod.GetParameters())
                     {
                         var value = parameters[parameterInfo.Name];
-                        list.Add(Convert.ChangeType(value, parameterInfo.ParameterType));
+                        var parameterType = parameterInfo.ParameterType;
+
+                        var parameter = _typeConvertibleService.Convert(value, parameterType);
+                        list.Add(parameter);
                     }
 
-                    return method.Invoke(instance, list.ToArray());
+                    var result = implementationMethod.Invoke(instance, list.ToArray());
+
+                    return result;
                 }
             };
         }

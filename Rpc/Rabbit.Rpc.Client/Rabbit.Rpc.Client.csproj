@@ -63,12 +63,12 @@
     <Reference Include="System.Core" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Routing\IServiceRouteProvider.cs" />
-    <Compile Include="Routing\IServiceRouteManager.cs" />
-    <Compile Include="Routing\Implementation\DefaultServiceRouteManager.cs" />
-    <Compile Include="Routing\Implementation\DefaultServiceRouteProvider.cs" />
     <Compile Include="Address\Resolvers\IAddressResolver.cs" />
     <Compile Include="Address\Resolvers\Implementation\DefaultAddressResolver.cs" />
+    <Compile Include="Address\Resolvers\Implementation\Selectors\IAddressSelector.cs" />
+    <Compile Include="Address\Resolvers\Implementation\Selectors\Implementation\AddressSelectorBase.cs" />
+    <Compile Include="Address\Resolvers\Implementation\Selectors\Implementation\PollingAddressSelector.cs" />
+    <Compile Include="Address\Resolvers\Implementation\Selectors\Implementation\RandomAddressSelector.cs" />
     <Compile Include="Implementation\RemoteInvokeService.cs" />
     <Compile Include="IRemoteInvokeService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

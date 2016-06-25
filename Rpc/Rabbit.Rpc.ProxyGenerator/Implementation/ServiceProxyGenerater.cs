@@ -130,6 +130,7 @@ namespace Rabbit.Rpc.ProxyGenerator.Implementation
                     UsingDirective(IdentifierName("System")),
                     UsingDirective(GetQualifiedNameSyntax("System.Threading.Tasks")),
                     UsingDirective(GetQualifiedNameSyntax("System.Collections.Generic")),
+                    UsingDirective(GetQualifiedNameSyntax("Rabbit.Rpc.Convertibles")),
                     UsingDirective(GetQualifiedNameSyntax("Rabbit.Rpc.Client")),
                     UsingDirective(GetQualifiedNameSyntax("Rabbit.Rpc.Serialization")),
                     UsingDirective(GetQualifiedNameSyntax("Rabbit.Rpc.ProxyGenerator.Implementation"))
@@ -145,16 +146,18 @@ namespace Rabbit.Rpc.ProxyGenerator.Implementation
                 .WithParameterList(
                     ParameterList(
                         SeparatedList<ParameterSyntax>(
-                                new SyntaxNodeOrToken[]{
-                                    Parameter(
-                                        Identifier("remoteInvokeService"))
+                            new SyntaxNodeOrToken[]
+                            {
+                                Parameter(
+                                    Identifier("remoteInvokeService"))
                                     .WithType(
                                         IdentifierName("IRemoteInvokeService")),
-                                    Token(SyntaxKind.CommaToken),
-                                    Parameter(
-                                        Identifier("serializer"))
+                                Token(SyntaxKind.CommaToken),
+                                Parameter(
+                                    Identifier("typeConvertibleService"))
                                     .WithType(
-                                        IdentifierName("ISerializer"))})))
+                                        IdentifierName("ITypeConvertibleService"))
+                            })))
                 .WithInitializer(
                         ConstructorInitializer(
                             SyntaxKind.BaseConstructorInitializer,
@@ -165,7 +168,7 @@ namespace Rabbit.Rpc.ProxyGenerator.Implementation
                                             IdentifierName("remoteInvokeService")),
                                         Token(SyntaxKind.CommaToken),
                                         Argument(
-                                            IdentifierName("serializer"))}))))
+                                            IdentifierName("typeConvertibleService"))}))))
                 .WithBody(Block());
         }
 
@@ -175,40 +178,46 @@ namespace Rabbit.Rpc.ProxyGenerator.Implementation
             return array.Select(GenerateMethodDeclaration).ToArray();
         }
 
+        private static TypeSyntax GetTypeSyntax(Type type)
+        {
+            //没有返回值。
+            if (type == null)
+                return null;
+
+            //非泛型。
+            if (!type.IsGenericType)
+                return GetQualifiedNameSyntax(type.FullName);
+
+            var list = new List<SyntaxNodeOrToken>();
+
+            foreach (var genericTypeArgument in type.GenericTypeArguments)
+            {
+                list.Add(genericTypeArgument.IsGenericType
+                    ? GetTypeSyntax(genericTypeArgument)
+                    : GetQualifiedNameSyntax(genericTypeArgument.FullName));
+                list.Add(Token(SyntaxKind.CommaToken));
+            }
+
+            var array = list.Take(list.Count - 1).ToArray();
+            var typeArgumentListSyntax = TypeArgumentList(SeparatedList<TypeSyntax>(array));
+            return GenericName(type.Name.Substring(0, type.Name.IndexOf('`')))
+                .WithTypeArgumentList(typeArgumentListSyntax);
+        }
+
         private MemberDeclarationSyntax GenerateMethodDeclaration(MethodInfo method)
         {
             var serviceId = _serviceIdGenerator.GenerateServiceId(method);
-
-            var arguments = method.ReturnType.GetGenericArguments();
-            var resultType = arguments.Any() ? arguments.First() : null;
-            SimpleNameSyntax returnDeclaration;
-            if (resultType != null)
-            {
-                returnDeclaration = GenericName(Identifier("Task")).WithTypeArgumentList(
-                    TypeArgumentList(
-                        SingletonSeparatedList<TypeSyntax>(
-                            GetQualifiedNameSyntax(resultType))));
-            }
-            else
-            {
-                returnDeclaration = IdentifierName("Task");
-            }
-            var declaration = MethodDeclaration(
-                returnDeclaration,
-                Identifier(method.Name))
-                .WithModifiers(TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.AsyncKeyword)));
+            var returnDeclaration = GetTypeSyntax(method.ReturnType);
 
             var parameterList = new List<SyntaxNodeOrToken>();
+            var parameterDeclarationList = new List<SyntaxNodeOrToken>();
 
             foreach (var parameter in method.GetParameters())
             {
-                declaration = declaration.WithParameterList(
-                    ParameterList(
-                        SeparatedList<ParameterSyntax>(
-                            new SyntaxNodeOrToken[]{
-                                Parameter(
+                parameterDeclarationList.Add(Parameter(
                                     Identifier(parameter.Name))
-                                    .WithType(GetQualifiedNameSyntax(parameter.ParameterType))})));
+                                    .WithType(GetQualifiedNameSyntax(parameter.ParameterType)));
+                parameterDeclarationList.Add(Token(SyntaxKind.CommaToken));
 
                 parameterList.Add(InitializerExpression(
                     SyntaxKind.ComplexElementInitializerExpression,
@@ -223,18 +232,23 @@ namespace Rabbit.Rpc.ProxyGenerator.Implementation
             }
             if (parameterList.Any())
             {
-                parameterList.Remove(parameterList.Last());
+                parameterList.RemoveAt(parameterList.Count - 1);
+                parameterDeclarationList.RemoveAt(parameterDeclarationList.Count - 1);
             }
+
+            var declaration = MethodDeclaration(
+                returnDeclaration,
+                Identifier(method.Name))
+                .WithModifiers(TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.AsyncKeyword)))
+                .WithParameterList(ParameterList(SeparatedList<ParameterSyntax>(parameterDeclarationList)));
 
             ExpressionSyntax expressionSyntax;
             StatementSyntax statementSyntax;
 
-            if (resultType != null)
+            if (method.ReturnType != typeof(Task))
             {
                 expressionSyntax = GenericName(
-                    Identifier("Invoke")).WithTypeArgumentList(
-                        TypeArgumentList(
-                            SingletonSeparatedList<TypeSyntax>(GetQualifiedNameSyntax(resultType))));
+                    Identifier("Invoke")).WithTypeArgumentList(((GenericNameSyntax)returnDeclaration).TypeArgumentList);
             }
             else
             {
@@ -274,7 +288,7 @@ namespace Rabbit.Rpc.ProxyGenerator.Implementation
                                                 Literal(serviceId)))
                                 }))));
 
-            if (resultType != null)
+            if (method.ReturnType != typeof(Task))
             {
                 statementSyntax = ReturnStatement(expressionSyntax);
             }
